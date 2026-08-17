@@ -54,7 +54,15 @@
     --         ...
     --         else null                        -- nhóm 3
     --     end
-    try_cast({{ col }} as integer)
+    case
+        when trim(lower({{ col }})) in ('1', '2', '3', '4')
+            then try_cast(trim({{ col }}) as integer)
+        when trim(lower({{ col }})) = 'urgent' then 1
+        when trim(lower({{ col }})) = 'high'   then 2
+        when trim(lower({{ col }})) = 'medium' then 3
+        when trim(lower({{ col }})) = 'low'    then 4
+        else null
+    end
 {% endmacro %}
 
 
@@ -64,6 +72,10 @@
     hơn (rỗng / NULL / là số nhưng ngoài khoảng / là chuỗi lạ).
 #}
 {% macro priority_reject_reason(col) %}
-    -- TODO(nhiệm vụ 3, không bắt buộc): phân biệt các loại lỗi khác nhau.
-    'priority không quy đổi được về 1..4'
+    case
+        when {{ col }} is null or trim({{ col }}) = '' then 'priority rỗng hoặc NULL'
+        when try_cast(trim({{ col }}) as integer) is not null
+            then 'priority là số ngoài miền 1..4'
+        else 'priority không phải nhãn hoặc số hợp lệ'
+    end
 {% endmacro %}

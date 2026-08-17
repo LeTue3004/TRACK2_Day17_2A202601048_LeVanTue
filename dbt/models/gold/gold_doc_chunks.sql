@@ -5,6 +5,7 @@
 -- Model này không chứa lỗi cần sửa; dùng làm nhóm đối chứng: ba lượt chạy
 -- phải cho cùng một checksum. Nếu nó sai lệch, thay đổi của bạn đã tác động
 -- ra ngoài phạm vi nhiệm vụ.
+-- depends_on: {{ ref('silver_transcripts') }}
 
 {{ config(materialized = 'table') }}
 

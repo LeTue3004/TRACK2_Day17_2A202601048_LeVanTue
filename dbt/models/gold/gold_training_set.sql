@@ -2,6 +2,7 @@
 -- gold_training_set — tập huấn luyện cho mô hình phân loại ticket.
 -- Grain: 1 hàng / 1 ticket.
 -- ---------------------------------------------------------------------------
+-- depends_on: {{ ref('silver_tickets') }}
 -- KHUNG THỰC HIỆN — NHIỆM VỤ 1
 --
 --   Một model incremental của dbt được quyết định bởi ba tham số trong
@@ -26,6 +27,8 @@
 
 {{ config(
     materialized     = 'incremental',
+    unique_key       = 'ticket_id',
+    incremental_strategy = 'merge',
     on_schema_change = 'fail'
 ) }}
 

@@ -19,7 +19,9 @@ import argparse
 import json
 import os
 import pathlib
+import subprocess
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
@@ -29,23 +31,64 @@ from tools.common import DBT_DIR, RUN_DATES, WAREHOUSE, connect  # noqa: E402
 
 
 def dbt_run(run_date: str, select: str | None = None) -> None:
-    from dbt.cli.main import dbtRunner
+    # dbtRunner giữ parser state giữa các lần invoke trong cùng process. Mỗi
+    # ngày chạy CLI trong process và target tạm riêng để dependency graph của
+    # ngày trước không ảnh hưởng ngày sau; warehouse vẫn được dùng chung.
+    with tempfile.TemporaryDirectory(prefix="lab17-dbt-target-") as target_path:
+        dbt_bin = str(pathlib.Path(sys.executable).with_name("dbt"))
+        common_args = [
+            "--project-dir", str(DBT_DIR),
+            "--profiles-dir", str(DBT_DIR),
+            "--target-path", target_path,
+            "--log-path", str(DBT_DIR / "logs"),
+            "--quiet",
+            "--vars", json.dumps({"run_date": run_date}),
+        ]
 
-    args = [
-        "run",
-        "--project-dir", str(DBT_DIR),
-        "--profiles-dir", str(DBT_DIR),
-        "--target-path", str(DBT_DIR / "target"),
-        "--log-path", str(DBT_DIR / "logs"),
-        "--quiet",
-        "--vars", json.dumps({"run_date": run_date}),
-    ]
-    if select:
-        args += ["--select", select]
-    res = dbtRunner().invoke(args)
-    if not res.success:
-        msg = getattr(res, "exception", None) or "dbt run thất bại"
-        raise SystemExit(f"\n  ✗ dbt run lỗi ở ngày {run_date}: {msg}")
+        # dbt 1.10 đôi lúc tạo graph rỗng khi `run` vừa parse vừa execute.
+        # Parse riêng trước, sau đó `run` dùng lại manifest đã kiểm tra.
+        required_edges = {
+            "model.lab17.gold_doc_chunks": "model.lab17.silver_transcripts",
+            "model.lab17.gold_feature_daily": "model.lab17.silver_events",
+            "model.lab17.gold_training_set": "model.lab17.silver_tickets",
+        }
+        manifest_ok = False
+        for _attempt in range(1, 11):
+            parse_args = [
+                dbt_bin,
+                "--no-partial-parse",
+                "--no-static-parser",
+                "parse",
+                *common_args,
+            ]
+            parsed = subprocess.run(parse_args, check=False)
+            manifest_file = pathlib.Path(target_path) / "manifest.json"
+            if parsed.returncode != 0 or not manifest_file.exists():
+                continue
+
+            manifest = json.loads(manifest_file.read_text())
+            manifest_ok = all(
+                parent in manifest["nodes"][node]["depends_on"]["nodes"]
+                for node, parent in required_edges.items()
+            )
+            if manifest_ok:
+                break
+
+        if not manifest_ok:
+            raise SystemExit(f"\n  ✗ manifest dbt thiếu dependency ở ngày {run_date}")
+
+        args = [
+            dbt_bin,
+            "--partial-parse",
+            "--no-static-parser",
+            "run",
+            *common_args,
+        ]
+        if select:
+            args += ["--select", select]
+        res = subprocess.run(args, check=False)
+    if res.returncode != 0:
+        raise SystemExit(f"\n  ✗ dbt run lỗi ở ngày {run_date}: dbt run thất bại")
 
 
 def release_dbt() -> None:
